@@ -1,4 +1,4 @@
-// GhostModeHome 1.0.0 — chạm theo cử chỉ TUỲ CHỈNH để ẩn/hiện toàn bộ icon
+// GhostModeHome 1.1.0 — chạm theo cử chỉ TUỲ CHỈNH để ẩn/hiện toàn bộ icon
 // màn hình chính, khoe trọn hình nền; chạm lại để hiện về.
 // Mặc định: chạm 3 lần vào vùng trống (KHÔNG đụng DoubleTapToLock của anh).
 // Mọi chuyển động dùng vật lý lò xo + trễ lan sóng theo khoảng cách từ điểm
@@ -516,6 +516,6 @@ static void GMLockStateChanged(CFNotificationCenterRef center, void *observer,
             GMLockStateChanged, CFSTR("com.apple.springboard.lockstate"), NULL,
             CFNotificationSuspensionBehaviorDeliverImmediately);
         %init;
-        GMLog(@"GhostModeHome 1.0.0 loaded. enabled=%d", pEnabled);
+        GMLog(@"GhostModeHome 1.1.0 loaded. enabled=%d", pEnabled);
     }
 }
