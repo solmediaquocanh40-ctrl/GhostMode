@@ -1,4 +1,4 @@
-// GhostModeHome 1.1.2 — chạm theo cử chỉ TUỲ CHỈNH để ẩn/hiện toàn bộ icon
+// GhostModeHome 1.1.4 — chạm theo cử chỉ TUỲ CHỈNH để ẩn/hiện toàn bộ icon
 // màn hình chính, khoe trọn hình nền; chạm lại để hiện về.
 // Mặc định: chạm 3 lần vào vùng trống (KHÔNG đụng DoubleTapToLock của anh).
 // Mọi chuyển động dùng vật lý lò xo + trễ lan sóng theo khoảng cách từ điểm
@@ -39,6 +39,7 @@ static BOOL    pDebug                   = NO;
 // khoá máy/respring vẫn giữ nguyên cho tới khi anh chạm lại hoặc tắt khách.
 static BOOL    pGuestEnabled            = NO;
 static NSSet<NSString *> *pGuestAppSet  = nil;
+static NSSet<NSString *> *pGuestFolderSet = nil; // ID các thư mục bị ẩn theo khách
 
 // ---------------------------------------------------------------- trạng thái
 static BOOL gHidden      = NO; // Ghost: đang ẩn TOÀN BỘ icon
@@ -89,6 +90,9 @@ static void GMLoadPrefs(void) {
     id guestApps            = GMGetPref(@"guestApps", nil);
     pGuestAppSet            = [guestApps isKindOfClass:[NSArray class]]
                                 ? [NSSet setWithArray:guestApps] : [NSSet set];
+    id guestFolders         = GMGetPref(@"guestFolders", nil);
+    pGuestFolderSet         = [guestFolders isKindOfClass:[NSArray class]]
+                                ? [NSSet setWithArray:guestFolders] : [NSSet set];
     // Trạng thái khách đang ẩn chỉ sống khi còn vũ trang; tắt vũ trang là xả.
     gGuestHidden            = pGuestEnabled && [GMGetPref(@"guestActive", @NO) boolValue];
 }
@@ -211,11 +215,67 @@ static NSString *GMIconBundleID(UIView *iconView) {
     return nil;
 }
 
-// Icon này có nằm trong danh sách khách không (chưa tính trạng thái ẩn).
+// Icon này có phải icon THƯ MỤC không — nhận diện qua class của view
+// (SBFolderIconView) hoặc class của model (SBFolderIcon).
+static BOOL GMIsFolderIconView(UIView *iconView) {
+    @try {
+        if ([NSStringFromClass([iconView class]) containsString:@"Folder"]) return YES;
+        id icon = [iconView valueForKey:@"icon"];
+        if (icon && [NSStringFromClass([icon class]) containsString:@"Folder"]) return YES;
+    } @catch (__unused NSException *e) {}
+    return NO;
+}
+
+// ID bền của một thư mục — dò qua model SBIcon: nodeIdentifier là ID duy
+// nhất của thư mục, không đổi khi anh đổi tên thư mục.
+static NSString *GMIconFolderID(UIView *iconView) {
+    @try {
+        id icon = [iconView valueForKey:@"icon"];
+        if (!icon) return nil;
+        for (NSString *selName in @[@"nodeIdentifier", @"uniqueIdentifier", @"identifier"]) {
+            SEL sel = NSSelectorFromString(selName);
+            if ([icon respondsToSelector:sel]) {
+                id v = ((id (*)(id, SEL))objc_msgSend)(icon, sel);
+                if ([v isKindOfClass:[NSString class]] && [(NSString *)v length] > 0) return v;
+            }
+        }
+    } @catch (__unused NSException *e) {}
+    return nil;
+}
+
+// Tên hiển thị của thư mục (để xuất danh sách cho trang Cài đặt).
+static NSString *GMIconFolderName(UIView *iconView) {
+    @try {
+        id icon = [iconView valueForKey:@"icon"];
+        if (!icon) return nil;
+        for (NSString *selName in @[@"displayName", @"name"]) {
+            SEL sel = NSSelectorFromString(selName);
+            if ([icon respondsToSelector:sel]) {
+                id v = ((id (*)(id, SEL))objc_msgSend)(icon, sel);
+                if ([v isKindOfClass:[NSString class]] && [(NSString *)v length] > 0) return v;
+            }
+        }
+    } @catch (__unused NSException *e) {}
+    return nil;
+}
+
+// Icon này có nằm trong danh sách khách không (chưa tính trạng thái ẩn) —
+// app thì so bundle ID, thư mục thì so ID thư mục.
 static BOOL GMIconInGuestList(UIView *iconView) {
+    if (GMIsFolderIconView(iconView)) {
+        if (pGuestFolderSet.count == 0) return NO;
+        NSString *fid = GMIconFolderID(iconView);
+        return fid && [pGuestFolderSet containsObject:fid];
+    }
     if (pGuestAppSet.count == 0) return NO;
     NSString *bid = GMIconBundleID(iconView);
     return bid && [pGuestAppSet containsObject:bid];
+}
+
+// Chế độ khách đang vũ trang = công tắc bật và có ít nhất một app hoặc
+// một thư mục trong danh sách.
+static BOOL GMGuestArmed(void) {
+    return pGuestEnabled && (pGuestAppSet.count + pGuestFolderSet.count) > 0;
 }
 
 // Chế độ khách có đang giấu RIÊNG icon này không (không tính trạng thái
@@ -376,7 +436,7 @@ static void GMToggleAt(CGPoint origin) {
     // Đang vũ trang Chế độ khách: cử chỉ chỉ đảo trạng thái của RIÊNG các
     // app trong danh sách, icon khác giữ nguyên (kiểu B anh chốt). Muốn
     // ẩn toàn bộ thì tắt Chế độ khách trong Cài đặt.
-    if (pGuestEnabled && pGuestAppSet.count > 0) {
+    if (GMGuestArmed()) {
         GMLog(@"Toggle Guest -> %d", !gGuestHidden);
         GMSetGuestHidden(!gGuestHidden, YES, origin);
         return;
@@ -410,6 +470,89 @@ static void GMApplyGuestState(BOOL animated) {
         else anim();
     }
     GMLog(@"ApplyGuestState enabled=%d soApp=%lu", pGuestEnabled, (unsigned long)pGuestAppSet.count);
+}
+
+// Trang Cài đặt chạy trong app Settings nên KHÔNG tự thấy được các thư mục
+// trên màn hình chính. Tweak (chạy trong SpringBoard) xuất danh sách thư
+// mục hiện có vào pref "folderCatalog" (mảng {id, name}) để trang "Chọn
+// thư mục bị ẩn" đọc và hiển thị. Chỉ ghi khi danh sách có thay đổi.
+static void GMExportFolderCatalog(void) {
+    NSMutableArray *cat = [NSMutableArray array];
+    NSMutableSet *seen = [NSMutableSet set];
+    for (UIView *v in GMAllIconViews()) {
+        if (!GMIsFolderIconView(v)) continue;
+        NSString *fid = GMIconFolderID(v);
+        if (!fid || [seen containsObject:fid]) continue;
+        [seen addObject:fid];
+        NSString *nm = GMIconFolderName(v);
+        [cat addObject:@{ @"id": fid, @"name": nm.length ? nm : @"Thư mục" }];
+    }
+    [cat sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+        return [a[@"name"] localizedCaseInsensitiveCompare:b[@"name"]];
+    }];
+    id old = GMGetPref(@"folderCatalog", nil);
+    if (![old isEqual:cat]) {
+        CFPreferencesSetAppValue(CFSTR("folderCatalog"),
+                                 (__bridge CFPropertyListRef)cat,
+                                 (__bridge CFStringRef)GM_DOMAIN);
+        CFPreferencesAppSynchronize((__bridge CFStringRef)GM_DOMAIN);
+        GMLog(@"FolderCatalog: %lu thu muc", (unsigned long)cat.count);
+    }
+}
+
+// Lên lịch xuất danh sách thư mục (gộp nhiều lần layout dồn dập thành một
+// lần xuất sau 1,5 giây, tránh tốn công khi SpringBoard layout liên tục).
+static BOOL gCatalogExportScheduled = NO;
+static void GMScheduleFolderCatalogExport(void) {
+    if (gCatalogExportScheduled) return;
+    gCatalogExportScheduled = YES;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        gCatalogExportScheduled = NO;
+        GMExportFolderCatalog();
+    });
+}
+
+// ------------------------------------------------- lọc thẻ đa nhiệm (switcher)
+// Khi Chế độ khách ĐANG ẨN, thẻ của các app trong danh sách cũng biến mất
+// khỏi màn hình đa nhiệm. Chỉ lọc ở tầng model (SBAppSwitcherModel), không
+// tắt app — hiện lại trạng thái khách là thẻ quay về đầy đủ.
+
+// Bundle ID của một SBAppLayout — dò phòng thủ qua các selector quen
+// thuộc; không xác định được thì trả nil và thẻ được GIỮ LẠI (an toàn).
+static NSString *GMAppLayoutBundleID(id layout) {
+    @try {
+        for (NSString *selName in @[@"bundleIdentifier", @"primaryBundleIdentifier"]) {
+            SEL sel = NSSelectorFromString(selName);
+            if ([layout respondsToSelector:sel]) {
+                id v = ((id (*)(id, SEL))objc_msgSend)(layout, sel);
+                if ([v isKindOfClass:[NSString class]] && [(NSString *)v length] > 0) return v;
+            }
+        }
+        if ([layout respondsToSelector:@selector(allItems)]) {
+            NSArray *items = ((id (*)(id, SEL))objc_msgSend)(layout, @selector(allItems));
+            for (id item in items ?: @[]) {
+                if ([item respondsToSelector:@selector(bundleIdentifier)]) {
+                    id v = ((id (*)(id, SEL))objc_msgSend)(item, @selector(bundleIdentifier));
+                    if ([v isKindOfClass:[NSString class]] && [(NSString *)v length] > 0) return v;
+                }
+            }
+        }
+    } @catch (__unused NSException *e) {}
+    return nil;
+}
+
+static NSArray *GMFilterSwitcherLayouts(NSArray *layouts) {
+    if (!layouts || !pGuestEnabled || !gGuestHidden || pGuestAppSet.count == 0) return layouts;
+    NSMutableArray *kept = [NSMutableArray arrayWithCapacity:layouts.count];
+    for (id layout in layouts) {
+        NSString *bid = GMAppLayoutBundleID(layout);
+        if (bid && [pGuestAppSet containsObject:bid]) continue; // giấu thẻ này
+        [kept addObject:layout];
+    }
+    if (kept.count != layouts.count)
+        GMLog(@"Switcher: da giau %lu the app khach", (unsigned long)(layouts.count - kept.count));
+    return kept;
 }
 
 // ---------------------------------------------------------------- cử chỉ
@@ -536,7 +679,7 @@ static void GMApplyGuestState(BOOL animated) {
 - (void)onPinch:(UIPinchGestureRecognizer *)g {
     if (g.state != UIGestureRecognizerStateEnded) return;
     if (!pEnabled || GMIsLocked() || GMIsEditing()) return;
-    BOOL guestArmed = pGuestEnabled && pGuestAppSet.count > 0;
+    BOOL guestArmed = GMGuestArmed();
     if (g.scale < 0.85) {
         if (guestArmed) { if (!gGuestHidden) GMSetGuestHidden(YES, YES, GMDefaultOrigin()); }
         else if (!gHidden) GMSetHidden(YES, YES, GMDefaultOrigin());
@@ -566,6 +709,7 @@ static void GMPrefsChanged(CFNotificationCenterRef center, void *observer,
             gGuestHidden = NO;
             GMSaveGuestActive(NO);
         }
+        GMExportFolderCatalog();
         GMApplyGuestState(YES);
         GMLog(@"Prefs reloaded. enabled=%d guest=%d", pEnabled, pGuestEnabled);
     });
@@ -593,6 +737,7 @@ static void GMLockStateChanged(CFNotificationCenterRef center, void *observer,
     if (((UIView *)self).window) {
         [[GMGestureHandler shared] attachToRootView:(UIView *)self];
         if (!gHidden) GMApplyGuestState(NO); // áp Chế độ khách ngay khi SpringBoard lên (bền sau respring), không hiệu ứng
+        GMExportFolderCatalog(); // xuất danh sách thư mục cho trang Cài đặt
     }
 }
 %end
@@ -602,6 +747,7 @@ static void GMLockStateChanged(CFNotificationCenterRef center, void *observer,
 %hook SBIconListView
 - (void)layoutSubviews {
     %orig;
+    GMScheduleFolderCatalogExport(); // thư mục mới tạo/đổi tên sẽ kịp vào danh sách Cài đặt
     if (!gAnimating) {
         BOOL inDock = GMHasAncestorClass((UIView *)self, @"SBDockView");
         for (UIView *sub in ((UIView *)self).subviews) {
@@ -648,6 +794,15 @@ static void GMLockStateChanged(CFNotificationCenterRef center, void *observer,
 }
 %end
 
+// Giấu thẻ đa nhiệm của app khách khi Chế độ khách đang ẩn (xem
+// GMFilterSwitcherLayouts). Chỉ một điểm hook ở tầng model cho gọn và an
+// toàn; switcher hỏi model mỗi lần mở nên trạng thái mới áp dụng ngay.
+%hook SBAppSwitcherModel
+- (NSArray *)appLayouts {
+    return GMFilterSwitcherLayouts(%orig);
+}
+%end
+
 // ---------------------------------------------------------------- ctor
 %ctor {
     @autoreleasepool {
@@ -659,6 +814,7 @@ static void GMLockStateChanged(CFNotificationCenterRef center, void *observer,
             GMLockStateChanged, CFSTR("com.apple.springboard.lockstate"), NULL,
             CFNotificationSuspensionBehaviorDeliverImmediately);
         %init;
-        GMLog(@"GhostModeHome 1.1.2 loaded. enabled=%d", pEnabled);
+        GMLog(@"GhostModeHome 1.1.4 loaded. enabled=%d", pEnabled);
+        GMLog(@"SwitcherModel: %@", NSClassFromString(@"SBAppSwitcherModel") ? @"co" : @"KHONG THAY");
     }
 }
