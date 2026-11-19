@@ -1,0 +1,9 @@
+Package: com.vn.ghostmodehome
+Name: GhostModeHome
+Version: 1.1.0
+Architecture: iphoneos-arm
+Description: Ẩn/hiện toàn bộ icon màn hình chính bằng cử chỉ tuỳ chỉnh để khoe trọn hình nền (mặc định chạm 3 lần vùng trống, không xung đột DoubleTapToLock; hiệu ứng lò xo + lan sóng). Từ 1.1.0 có thêm Chế độ khách: ẩn các app trong danh sách tự chọn, bền qua respring. Hide/show all Home Screen icons with a customizable gesture; 1.1.0 adds a persistent Guest Mode that hides apps you pick from a list.
+Maintainer: Quoc
+Author: Quoc
+Section: Tweaks
+Depends: mobilesubstrate
