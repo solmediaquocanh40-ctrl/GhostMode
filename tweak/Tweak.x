@@ -1,4 +1,4 @@
-// GhostModeHome 1.1.0 — chạm theo cử chỉ TUỲ CHỈNH để ẩn/hiện toàn bộ icon
+// GhostModeHome 1.1.2 — chạm theo cử chỉ TUỲ CHỈNH để ẩn/hiện toàn bộ icon
 // màn hình chính, khoe trọn hình nền; chạm lại để hiện về.
 // Mặc định: chạm 3 lần vào vùng trống (KHÔNG đụng DoubleTapToLock của anh).
 // Mọi chuyển động dùng vật lý lò xo + trễ lan sóng theo khoảng cách từ điểm
@@ -32,14 +32,18 @@ static BOOL    pStagger                 = YES;
 static CGFloat pAnimDuration            = 0.45;
 static CGFloat pAnimScale               = 0.85;
 static BOOL    pDebug                   = NO;
-// Chế độ khách (1.1.0): ẩn các app trong danh sách, BỀN qua khoá máy/respring
-// vì trạng thái chính là pref guestEnabled đọc lại mỗi lần SpringBoard lên.
+// Chế độ khách: pref guestEnabled là công tắc VŨ TRANG danh sách app
+// (guestApps). Khi đã vũ trang, cử chỉ (chạm 3 lần...) chỉ ẩn/hiện RIÊNG
+// các app trong danh sách, icon khác giữ nguyên — kiểu B anh chốt. Trạng
+// thái đang ẩn nằm ở gGuestHidden, lưu bền vào pref guestActive để qua
+// khoá máy/respring vẫn giữ nguyên cho tới khi anh chạm lại hoặc tắt khách.
 static BOOL    pGuestEnabled            = NO;
 static NSSet<NSString *> *pGuestAppSet  = nil;
 
 // ---------------------------------------------------------------- trạng thái
-static BOOL gHidden   = NO;
-static BOOL gAnimating = NO;
+static BOOL gHidden      = NO; // Ghost: đang ẩn TOÀN BỘ icon
+static BOOL gGuestHidden = NO; // Khách: đang ẩn RIÊNG các app trong danh sách
+static BOOL gAnimating   = NO;
 
 // ---------------------------------------------------------------- log
 static void GMLog(NSString *fmt, ...) {
@@ -85,6 +89,18 @@ static void GMLoadPrefs(void) {
     id guestApps            = GMGetPref(@"guestApps", nil);
     pGuestAppSet            = [guestApps isKindOfClass:[NSArray class]]
                                 ? [NSSet setWithArray:guestApps] : [NSSet set];
+    // Trạng thái khách đang ẩn chỉ sống khi còn vũ trang; tắt vũ trang là xả.
+    gGuestHidden            = pGuestEnabled && [GMGetPref(@"guestActive", @NO) boolValue];
+}
+
+// Lưu bền trạng thái khách đang ẩn (để qua respring vẫn giữ). Không post
+// thông báo prefsChanged: chính tweak là nơi duy nhất ghi khoá này, và nó
+// đã tự cập nhật gGuestHidden ngay lúc ghi.
+static void GMSaveGuestActive(BOOL on) {
+    CFPreferencesSetAppValue(CFSTR("guestActive"),
+                             on ? kCFBooleanTrue : kCFBooleanFalse,
+                             (__bridge CFStringRef)GM_DOMAIN);
+    CFPreferencesAppSynchronize((__bridge CFStringRef)GM_DOMAIN);
 }
 
 // ---------------------------------------------------------------- helpers
@@ -195,16 +211,56 @@ static NSString *GMIconBundleID(UIView *iconView) {
     return nil;
 }
 
-// Một icon có phải ẩn hay không = đang Ghost (ẩn tất cả) HOẶC đang Chế độ
-// khách và app nằm trong danh sách. Đây là nơi duy nhất quyết định, để hai
-// chế độ không bao giờ đánh nhau.
+// Icon này có nằm trong danh sách khách không (chưa tính trạng thái ẩn).
+static BOOL GMIconInGuestList(UIView *iconView) {
+    if (pGuestAppSet.count == 0) return NO;
+    NSString *bid = GMIconBundleID(iconView);
+    return bid && [pGuestAppSet containsObject:bid];
+}
+
+// Chế độ khách có đang giấu RIÊNG icon này không (không tính trạng thái
+// Ghost): phải đồng thời còn vũ trang VÀ đang ở trạng thái khách-ẩn.
+static BOOL GMGuestHidesIcon(UIView *iconView) {
+    return gGuestHidden && pGuestEnabled && GMIconInGuestList(iconView);
+}
+
+// Một icon có phải ẩn hay không = đang Ghost (ẩn tất cả) HOẶC đang bị
+// khách giấu riêng. Đây là nơi duy nhất quyết định, để hai chế độ không
+// bao giờ đánh nhau.
 static BOOL GMShouldHideIcon(UIView *iconView) {
     if (gHidden) return YES;
-    if (pGuestEnabled && pGuestAppSet.count > 0) {
-        NSString *bid = GMIconBundleID(iconView);
-        if (bid && [pGuestAppSet containsObject:bid]) return YES;
+    return GMGuestHidesIcon(iconView);
+}
+
+// Đánh dấu những icon đang bị ẩn BỞI Chế độ khách (khác với ẩn bởi Ghost),
+// để khi tắt Chế độ khách / bỏ chọn app thì chỉ hiện lại đúng những icon
+// mình đã ẩn, không đụng vào alpha mà SpringBoard tự quản lý vì việc khác.
+static const void *kGMGuestHiddenKey = &kGMGuestHiddenKey;
+static BOOL GMIsGuestHidden(UIView *v) {
+    return [objc_getAssociatedObject(v, kGMGuestHiddenKey) boolValue];
+}
+static void GMSetGuestHiddenMark(UIView *v, BOOL m) {
+    objc_setAssociatedObject(v, kGMGuestHiddenKey, m ? @YES : nil,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+// Ép trạng thái khách lên MỘT icon ngay lập tức, không hiệu ứng: icon
+// thuộc diện khách giấu thì phải mờ; icon mình từng giấu mà nay không
+// còn thuộc diện giấu thì trả lại. Chỉ chạy khi Ghost không giữ màn
+// hình (gHidden/gAnimating) để hai chế độ không bao giờ đánh nhau.
+static void GMEnforceGuestOnIcon(UIView *icon) {
+    if (gHidden || gAnimating) return;
+    if (GMGuestHidesIcon(icon)) {
+        if (icon.alpha != 0.0) {
+            icon.alpha = 0.0;
+            icon.transform = GMHiddenTransform();
+        }
+        GMSetGuestHiddenMark(icon, YES);
+    } else if (GMIsGuestHidden(icon)) {
+        icon.alpha = 1.0;
+        icon.transform = CGAffineTransformIdentity;
+        GMSetGuestHiddenMark(icon, NO);
     }
-    return NO;
 }
 
 static NSArray<UIView *> *GMAllIconViews(void) {
@@ -248,6 +304,7 @@ static void GMSetHidden(BOOL hidden, BOOL animated, CGPoint origin) {
             delay = MIN(0.30, hypot(c.x - origin.x, c.y - origin.y) / 2400.0);
         }
         BOOL hide = GMShouldHideIcon(icon); // tôn trọng cả Chế độ khách khi hiện lại
+        if (!hidden) GMSetGuestHiddenMark(icon, hide && GMGuestHidesIcon(icon));
         void (^anim)(void) = ^{
             icon.alpha = hide ? 0.0 : 1.0;
             icon.transform = hide ? tHidden : CGAffineTransformIdentity;
@@ -271,15 +328,67 @@ static void GMSetHidden(BOOL hidden, BOOL animated, CGPoint origin) {
     }
 }
 
+// Ẩn/hiện RIÊNG các app trong danh sách khách, cùng công thức mượt như
+// Ghost (lò xo + lan sóng từ điểm chạm) nhưng không đụng icon ngoài danh
+// sách, cũng không đụng cả cụm Dock/chấm trang/nút tìm kiếm. App trong
+// danh sách mà nằm ở Dock hay trong thư mục vẫn ẩn theo từng icon.
+static void GMSetGuestHidden(BOOL hidden, BOOL animated, CGPoint origin) {
+    if (gGuestHidden == hidden) return;
+    gGuestHidden = hidden;
+    GMSaveGuestActive(hidden);
+    GMLog(@"SetGuestHidden=%d", hidden);
+
+    NSTimeInterval dur = animated ? pAnimDuration : 0.0;
+    gAnimating = animated;
+    if (animated) {
+        NSTimeInterval total = dur + 0.35;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(total * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{ gAnimating = NO; });
+    }
+
+    CGAffineTransform tHidden = GMHiddenTransform();
+    UIViewAnimationOptions opts = UIViewAnimationOptionAllowUserInteraction |
+                                  UIViewAnimationOptionBeginFromCurrentState |
+                                  UIViewAnimationOptionCurveEaseInOut;
+    for (UIView *icon in GMAllIconViews()) {
+        if (!GMIconInGuestList(icon)) continue;
+        CGFloat delay = 0;
+        if (animated && pStagger) {
+            CGPoint c = icon.center;
+            if (icon.superview) c = [icon.superview convertPoint:icon.center toView:nil];
+            delay = MIN(0.30, hypot(c.x - origin.x, c.y - origin.y) / 2400.0);
+        }
+        GMSetGuestHiddenMark(icon, hidden);
+        void (^anim)(void) = ^{
+            icon.alpha = hidden ? 0.0 : 1.0;
+            icon.transform = hidden ? tHidden : CGAffineTransformIdentity;
+        };
+        if (animated)
+            [UIView animateWithDuration:dur delay:delay
+                 usingSpringWithDamping:0.88 initialSpringVelocity:0.45
+                                options:opts animations:anim completion:nil];
+        else anim();
+    }
+}
+
 static void GMToggleAt(CGPoint origin) {
     if (!pEnabled || GMIsLocked()) return;
+    // Đang vũ trang Chế độ khách: cử chỉ chỉ đảo trạng thái của RIÊNG các
+    // app trong danh sách, icon khác giữ nguyên (kiểu B anh chốt). Muốn
+    // ẩn toàn bộ thì tắt Chế độ khách trong Cài đặt.
+    if (pGuestEnabled && pGuestAppSet.count > 0) {
+        GMLog(@"Toggle Guest -> %d", !gGuestHidden);
+        GMSetGuestHidden(!gGuestHidden, YES, origin);
+        return;
+    }
     GMLog(@"Toggle -> %d", !gHidden);
     GMSetHidden(!gHidden, YES, origin);
 }
 
-// Áp trạng thái Chế độ khách lên mọi icon (kể cả icon trong Dock): icon trong
-// danh sách thì mờ đi, ngoài danh sách thì trả lại. Gọi khi đổi pref, khi bật/
-// tắt chế độ khách, và một lần lúc SpringBoard vừa lên (áp bền sau respring).
+// Đồng bộ trạng thái khách lên mọi icon (kể cả icon trong Dock) theo
+// gGuestHidden hiện tại: app thuộc diện giấu thì mờ đi, còn lại trả về.
+// Gọi khi đổi pref (đổi danh sách lúc đang ẩn, tắt vũ trang...) và một
+// lần lúc SpringBoard vừa lên (áp bền sau respring).
 static void GMApplyGuestState(BOOL animated) {
     NSTimeInterval dur = animated ? 0.35 : 0.0;
     CGAffineTransform tHidden = GMHiddenTransform();
@@ -287,6 +396,7 @@ static void GMApplyGuestState(BOOL animated) {
                                   UIViewAnimationOptionBeginFromCurrentState;
     for (UIView *icon in GMAllIconViews()) {
         BOOL hide = GMShouldHideIcon(icon);
+        if (!gHidden) GMSetGuestHiddenMark(icon, GMGuestHidesIcon(icon));
         CGFloat target = hide ? 0.0 : 1.0;
         if (icon.alpha == target) continue;
         void (^anim)(void) = ^{
@@ -426,8 +536,14 @@ static void GMApplyGuestState(BOOL animated) {
 - (void)onPinch:(UIPinchGestureRecognizer *)g {
     if (g.state != UIGestureRecognizerStateEnded) return;
     if (!pEnabled || GMIsLocked() || GMIsEditing()) return;
-    if (g.scale < 0.85 && !gHidden)      GMSetHidden(YES, YES, GMDefaultOrigin());
-    else if (g.scale > 1.15 && gHidden)  GMSetHidden(NO,  YES, GMDefaultOrigin());
+    BOOL guestArmed = pGuestEnabled && pGuestAppSet.count > 0;
+    if (g.scale < 0.85) {
+        if (guestArmed) { if (!gGuestHidden) GMSetGuestHidden(YES, YES, GMDefaultOrigin()); }
+        else if (!gHidden) GMSetHidden(YES, YES, GMDefaultOrigin());
+    } else if (g.scale > 1.15) {
+        if (guestArmed) { if (gGuestHidden) GMSetGuestHidden(NO, YES, GMDefaultOrigin()); }
+        else if (gHidden) GMSetHidden(NO, YES, GMDefaultOrigin());
+    }
 }
 
 - (void)handleShake {
@@ -443,6 +559,13 @@ static void GMPrefsChanged(CFNotificationCenterRef center, void *observer,
         GMLoadPrefs();
         [[GMGestureHandler shared] refreshEnabledStates];
         if (!pEnabled && gHidden) GMSetHidden(NO, YES, GMDefaultOrigin());
+        if (!pGuestEnabled || !pEnabled) {
+            // Xả vũ trang (hoặc tắt cả tweak): xoá trạng thái ẩn bền của
+            // khách, GMApplyGuestState ngay dưới sẽ hiện các app lại. Khi
+            // còn vũ trang, hàm này KHÔNG tự ẩn app — ẩn là việc của cử chỉ.
+            gGuestHidden = NO;
+            GMSaveGuestActive(NO);
+        }
         GMApplyGuestState(YES);
         GMLog(@"Prefs reloaded. enabled=%d guest=%d", pEnabled, pGuestEnabled);
     });
@@ -456,6 +579,10 @@ static void GMLockStateChanged(CFNotificationCenterRef center, void *observer,
             GMLog(@"Mo khoa -> tu hien lai icon");
             GMSetHidden(NO, YES, GMDefaultOrigin());
         }
+        // Mở khoá xong, ép lại trạng thái khách một lượt (icon vừa được
+        // SpringBoard trình bày lại sau màn hình khoá). Lưu ý: mở khoá
+        // KHÔNG tự hiện app khách — trạng thái ẩn giữ nguyên cho người mượn.
+        if (gGuestHidden && !gHidden && !GMIsLocked()) GMApplyGuestState(NO);
     });
 }
 
@@ -465,7 +592,7 @@ static void GMLockStateChanged(CFNotificationCenterRef center, void *observer,
     %orig;
     if (((UIView *)self).window) {
         [[GMGestureHandler shared] attachToRootView:(UIView *)self];
-        if (pGuestEnabled) GMApplyGuestState(NO); // áp lại sau respring, không hiệu ứng
+        if (!gHidden) GMApplyGuestState(NO); // áp Chế độ khách ngay khi SpringBoard lên (bền sau respring), không hiệu ứng
     }
 }
 %end
@@ -475,18 +602,34 @@ static void GMLockStateChanged(CFNotificationCenterRef center, void *observer,
 %hook SBIconListView
 - (void)layoutSubviews {
     %orig;
-    if (!gAnimating && (gHidden || pGuestEnabled)) {
+    if (!gAnimating) {
         BOOL inDock = GMHasAncestorClass((UIView *)self, @"SBDockView");
         for (UIView *sub in ((UIView *)self).subviews) {
             if (!GMIsIconView(sub)) continue;
-            BOOL hide = GMShouldHideIcon(sub);
-            if (gHidden && inDock && !pHideDock) hide = NO; // Ghost mà không ẩn Dock thì chừa icon Dock
-            if (hide && sub.alpha != 0.0) {
-                sub.alpha = 0.0;
-                sub.transform = GMHiddenTransform();
+            if (gHidden) {
+                BOOL hide = GMShouldHideIcon(sub);
+                if (inDock && !pHideDock) hide = NO; // Ghost mà không ẩn Dock thì chừa icon Dock
+                if (hide && sub.alpha != 0.0) {
+                    sub.alpha = 0.0;
+                    sub.transform = GMHiddenTransform();
+                }
+            } else {
+                // Ghost đang tắt: ép trạng thái khách hiện tại (đã bật/tắt
+                // bằng cử chỉ) ngay trong layout, hai chiều ẩn/hiện, để icon
+                // mới trình bày lại không bao giờ lộ app thuộc diện giấu.
+                GMEnforceGuestOnIcon(sub);
             }
         }
     }
+}
+%end
+
+// Mỗi lần SpringBoard trình bày lại từng icon (về màn hình chính, mở khoá,
+// chuyển trang...) ép lại quyết định của Chế độ khách lên chính icon đó.
+%hook SBIconView
+- (void)layoutSubviews {
+    %orig;
+    if (!gAnimating && !gHidden) GMEnforceGuestOnIcon((UIView *)self);
 }
 %end
 
@@ -516,6 +659,6 @@ static void GMLockStateChanged(CFNotificationCenterRef center, void *observer,
             GMLockStateChanged, CFSTR("com.apple.springboard.lockstate"), NULL,
             CFNotificationSuspensionBehaviorDeliverImmediately);
         %init;
-        GMLog(@"GhostModeHome 1.1.0 loaded. enabled=%d", pEnabled);
+        GMLog(@"GhostModeHome 1.1.2 loaded. enabled=%d", pEnabled);
     }
 }
