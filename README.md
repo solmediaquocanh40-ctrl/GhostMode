@@ -1,5 +1,16 @@
-GhostModeHome 1.1.2
+GhostModeHome 1.1.4
 Ẩn/hiện toàn bộ icon màn hình chính bằng cử chỉ tuỳ chỉnh để khoe trọn hình nền. Chạm lại đúng cử chỉ để hiện về.
+Mới ở 1.1.4 — giấu cả thẻ đa nhiệm (switcher) của app khách: khi Chế độ
+khách đang ở trạng thái ẩn, thẻ của các app trong danh sách cũng biến mất khỏi
+màn hình đa nhiệm (lọc ở SBAppSwitcherModel). App không bị tắt, chỉ giấu thẻ;
+hiện lại trạng thái khách là thẻ quay về đầy đủ. Chỉ áp cho Chế độ khách,
+không áp cho chế độ ẩn toàn bộ icon.
+Mới ở 1.1.3 — ẩn cả THƯ MỤC theo Chế độ khách: trong Cài đặt có thêm mục
+"Chọn thư mục bị ẩn". Thư mục hoạt động y hệt app trong danh sách khách: bật
+Chế độ khách là vũ trang, dùng cử chỉ thì thư mục mới ẩn khỏi màn hình chính,
+chạm lại thì hiện. Trang Settings không tự thấy được thư mục của SpringBoard,
+nên tweak tự xuất danh sách thư mục hiện có sang cho trang Cài đặt hiển thị —
+thư mục nhận diện bằng ID bền, đổi tên thư mục không làm mất lựa chọn.
 Sửa ở 1.1.2 (kiểu B — đúng ý anh chốt): Bật Chế độ khách chỉ là VŨ TRANG danh
 sách app, app vẫn hiện bình thường. Sau đó dùng cử chỉ đã chọn (mặc định chạm 3
 lần) để ẩn/hiện RIÊNG các app trong danh sách — icon khác giữ nguyên cho người
