@@ -34,7 +34,7 @@
 			<key>label</key>
 			<string>CHẾ ĐỘ KHÁCH</string>
 			<key>footerText</key>
-			<string>Chế độ khách ẩn các app anh chọn trong danh sách — bền qua khoá máy và respring, chỉ tắt khi anh tự tắt. Khác với ẩn toàn bộ (theo cử chỉ) ở trên.</string>
+			<string>Bật lên là danh sách app được vũ trang sẵn. Sau đó dùng cử chỉ đã chọn (mặc định chạm 3 lần) để ẩn/hiện RIÊNG các app trong danh sách — icon khác giữ nguyên cho người mượn dùng. Trạng thái ẩn bền qua khoá máy và respring; chạm lại cử chỉ, hoặc tắt công tắc này, để hiện app lại.</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -298,7 +298,7 @@
 			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>footerText</key>
-			<string>GhostModeHome 1.1.0 — made by Quoc. Nếu lỡ ẩn icon mà quên cử chỉ: khoá máy rồi mở khoá lại (icon tự hiện về), hoặc tắt tweak trong Cài đặt.</string>
+			<string>GhostModeHome 1.1.2 — made by Quoc. Nếu lỡ ẩn icon mà quên cử chỉ: khoá máy rồi mở khoá lại (icon tự hiện về), hoặc tắt tweak trong Cài đặt.</string>
 		</dict>
 	</array>
 </dict>
